@@ -1,0 +1,244 @@
+---
+title: "Gentrification after a Natural Disaster: The Case of Hurricane Katrina"
+output: 
+  html_document:
+    css: bodycss.css
+    fig_width: 8
+    font-family: Helvetica,Arial,sans-serif;
+    number_section: yes
+    toc: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+<style type="text/css">
+body{ 
+      font-size: 15px;
+      font-family: Helvetica,Arial,sans-serif;
+      line-height: 200%;
+  }
+  
+.author {
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+
+.date { 
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+.title{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+ 
+}
+
+.toc-ignore{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+.fluid-row{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+</style>
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE,echo=FALSE)
+```
+
+
+```{r init_mapdata}
+rm(list=ls())
+library(rgdal)
+library(ggplot2)
+library(rgeos)
+library(proj4)
+library(ggmap)
+library(sp)
+library(plyr)
+library(data.table)
+library(lfe)
+library(stargazer)
+
+
+pointsinside <- function(point,shapefile) {
+  output <- rep(NA,nrow(point))
+  pb <- txtProgressBar(min = 1, max = nrow(point), style = 3)
+  for(i in 1:nrow(point)) {
+      setTxtProgressBar(pb, i)
+      temp   <- SpatialPoints(point[i,],proj4string=CRS(proj4string(shapefile)))
+      output[i] <- gContains(shapefile,temp)
+  }
+  return (output)
+}
+
+ms_flood_raw <- readOGR("E:/gentrification/Katrina Flood Maps","Katrina_MS_SurgeInundationLimit")#  katrina_ms_abfe_contours
+ms_flood_raw <- gUnaryUnion(ms_flood_raw)
+proj4string <- "+proj=tmerc +lat_0=29.5 +lon_0=-88.83333333333333 +k=0.99995 +x_0=300000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs +ellps=GRS80 +towgs84=0,0,0"
+ms_flood <- fortify(ms_flood_raw)
+xy <- data.frame(x=ms_flood$long, y=ms_flood$lat)
+pj <- project(xy, proj4string, inverse=TRUE)
+ms_flood$long <- pj$x
+ms_flood$lat <- pj$y
+
+# cencustracts <- readOGR("E:/gentrification/CensusTracts Maps","cb_2017_28_tract_500k") 
+# cencustracts <- cencustracts[cencustracts$COUNTYFP %in% c("047","045","059"),]
+# cencustracts.df <- as(cencustracts,"data.frame")
+# cencustracts <- fortify(cencustracts,region="GEOID")
+# cencustracts <- merge(cencustracts,cencustracts.df,by.x='id',by.y='GEOID')
+#   dat <- cencustracts
+#   pj <- project(data.frame(x=dat$long,y=dat$lat), proj4string, inverse=FALSE)
+#   dat$long <- pj$x
+#   dat$lat <- pj$y
+#   dat <- dat[,c("long","lat")]
+# cencustracts['inside_flood'] <- as.numeric(pointsinside(dat,ms_flood_raw))
+# save(cencustracts,file="E:/HarveyData/CensusTracts/cencustracts_ms.rda")
+load(file="E:/gentrification/CensusTracts Maps/cencustracts_ms.rda")
+
+
+insidecount <- ddply(cencustracts,.(id),summarise,inside=sum(inside_flood),count=length(inside_flood))
+insidecount['inside_pct'] <- insidecount$inside/insidecount$count
+insidecount <- insidecount[,c("id","inside_pct")]
+cencustracts <- merge(cencustracts,insidecount,by="id")
+cencustracts$TRACTCE <- as.numeric(substr(floor(as.numeric(cencustracts$id)/100)*100,6,25))
+cencustracts$COUNTYFP <- as.numeric(as.character(cencustracts$COUNTYFP))
+cencustracts['treat'] <- ifelse(cencustracts$inside_pct>=0.8,1,ifelse(cencustracts$inside_pct<=0.2,-1,0))
+cencustracts['county_tract'] <- paste(cencustracts$COUNTYFP,cencustracts$TRACTCE)
+
+cencustracts_treat <- unique(cencustracts[cencustracts$inside_pct>=0.8,]$county_tract)
+cencustracts_treat <- c(cencustracts_treat,"47 600", "47 1300","47 100","47 2800","59 40600","59 41000","47 3600")
+
+cencustracts_ctrl <- unique(cencustracts[cencustracts$inside_pct<=0.2,]$county_tract) # [9800]    
+cencustracts_ctrl <- c(cencustracts_ctrl,"47 1700","47 2400","47 2700","59 40800","59 40700","59 40400","47 3400" )
+
+```
+
+
+```{r init_hmda_data}
+files = list.files(path = 'E:/gentrification/HMDA MS Katrina/2000-2003', pattern = '^MS_045047059')
+dat_list = lapply(paste('E:/gentrification/HMDA MS Katrina/2000-2003/',files,sep = ""), function (x) data.table(readRDS(x)))
+hmda_2000_2003 = rbindlist(dat_list, fill = TRUE)
+hmda_2000_2003$censustract <- floor((as.numeric(hmda_2000_2003$censustract)*100)/100)*100
+hmda_2000_2003 <- as.data.frame(hmda_2000_2003)
+hmda_2000_2003['county_tract'] <- paste(hmda_2000_2003$countycode,hmda_2000_2003$censustract)
+
+
+files = list.files(path = 'E:/gentrification/HMDA MS Katrina/2004-2010', pattern = '^MS_045047059')
+dat_list = lapply(paste('E:/gentrification/HMDA MS Katrina/2004-2010/',files,sep = ""), function (x) data.table(readRDS(x)))
+hmda_2004_2010 = rbindlist(dat_list, fill = TRUE)
+hmda_2004_2010$censustract <- floor((as.numeric(hmda_2004_2010$censustract)*100)/100)*100
+hmda_2004_2010 <- as.data.frame(hmda_2004_2010)
+hmda_2004_2010['county_tract'] <- paste(hmda_2004_2010$countycode,hmda_2004_2010$censustract)
+
+hmda_2004_2010 <- hmda_2004_2010[,names(hmda_2004_2010) %in% names(hmda_2000_2003)]
+
+hmda <- rbind(hmda_2000_2003,hmda_2004_2010)
+
+hmda <- hmda[hmda$county_tract %in% c(cencustracts_ctrl,cencustracts_treat),]
+hmda <- hmda[!hmda$censustract %in% c("47 1500","47 3200"),] # in both treatment and control
+
+hmda['post'] <- ifelse(hmda$asofdate>=2006,1,0)
+hmda['treat'] <- ifelse(hmda$county_tract %in% cencustracts_treat, 1,0)
+
+hmda['nonwhite'] <- ifelse(hmda$applicantrace1 != 5,1,0)
+hmda['primaryfemale'] <- ifelse(hmda$applicantsex==2,1,0)
+hmda['approved'] <- ifelse(hmda$actiontaken<=2,1,0)
+hmda['jointapplication'] <- ifelse(hmda$coapplicantsex!=5,1,0)
+hmda$applicantincome <- as.numeric(hmda$applicantincome)
+
+hmda['nonwhitenonasian'] <- ifelse(!hmda$applicantrace1 %in% c(5,2),1,0)
+
+# hmda$ratespread <- as.numeric(hmda$ratespread)
+```
+
+```{r flood_map}
+googlemap = get_map(location = c(-89, 30.4), zoom = 9, source = "google", maptype="terrain")
+
+cnames <- aggregate(cbind(long, lat) ~ TRACTCE, data=cencustracts, FUN=median)
+
+# map <- ggmap(googlemap)+
+map <- ggplot(data=ms_flood,aes(x=long,y=lat,group=group))+
+  geom_polygon(fill='red',alpha=0.5)+
+  scale_x_continuous( limits = c( -89.7 , -88.3 ) )+
+  scale_y_continuous( limits = c( 30.1 , 30.7 ) )+
+  geom_path(aes(x=long,y=lat,group=group),data=cencustracts,color = 'red',size=0.3)+
+  geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==1,],color = 'blue',size=1)+
+  geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==-1,],color = 'gray40',size=1)#+
+  #geom_text(data=cnames, aes( fontface=1.5 ,cnames$long, cnames$lat , label = cnames$TRACTCE,group=TRACTCE), color= "black"  )
+
+map
+
+# boundary<-  ggplot(data=cencustracts,aes(x=long,y=lat,group=group))+geom_path()+geom_text(data=cnames, aes( fontface=1 ,cnames$long, cnames$lat , label = cnames$TRACTCE,group=TRACTCE), color= "black",size=2 )  
+# boundary
+```
+
+
+```{r formulas}
+applicantincome = "log(applicantincome)~post*treat+nonwhite+primaryfemale+jointapplication|asofdate+countycode|0|asofdate+county_tract"
+nonwhite = "nonwhite~post*treat+log(applicantincome)+primaryfemale+jointapplication|asofdate+countycode|0|asofdate+county_tract"
+primaryfemale ="primaryfemale~post*treat+log(applicantincome)+nonwhite+jointapplication|asofdate+countycode|0|asofdate+county_tract"
+approved = "approved~post*treat+log(applicantincome)+nonwhite+jointapplication+primaryfemale|asofdate+countycode|0|asofdate+county_tract"
+
+dep.var.labels = c("log(applicantincome)","nonwhite","primaryfemale","approved")
+```
+
+
+# New Purchases, Owner occupied
+```{r}
+
+sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy==1 ,] # new purchases, owner occupied
+
+regs <- list()
+regs[[1]] <- felm(as.formula(applicantincome),data = sample)
+regs[[2]] <- felm(as.formula(nonwhite),data = sample[sample$applicantrace1!=6,])
+regs[[3]] <- felm(as.formula(primaryfemale),data = sample[sample$jointapplication==0,])
+regs[[4]] <- felm(as.formula(approved),data = sample)
+
+stargazer(regs,type="text",omit.stat=c("ser"),dep.var.labels = dep.var.labels)
+```
+
+
+# New Purchases, Non-owner occupied
+```{r}
+
+sample <- hmda[hmda$purposeofloan!=3 & hmda$occupancy!=1 ,] 
+
+regs <- list()
+regs[[1]] <- felm(as.formula(applicantincome),data = sample)
+regs[[2]] <- felm(as.formula(nonwhite),data = sample[sample$applicantrace1!=6,])
+regs[[3]] <- felm(as.formula(primaryfemale),data = sample[sample$jointapplication==0,])
+regs[[4]] <- felm(as.formula(approved),data = sample)
+
+stargazer(regs,type="text",omit.stat=c("ser"),dep.var.labels = dep.var.labels)
+```
+
+
+# Refinances
+```{r}
+
+sample <- hmda[hmda$purposeofloan==3,] 
+
+regs <- list()
+regs[[1]] <- felm(as.formula(applicantincome),data = sample)
+regs[[2]] <- felm(as.formula(nonwhite),data = sample[sample$applicantrace1!=6,])
+regs[[3]] <- felm(as.formula(primaryfemale),data = sample[sample$jointapplication==0,])
+regs[[4]] <- felm(as.formula(approved),data = sample)
+
+
+stargazer(regs,type="text",omit.stat=c("ser"),dep.var.labels = dep.var.labels)
+```
+
