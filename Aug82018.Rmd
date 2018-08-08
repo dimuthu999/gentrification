@@ -138,6 +138,7 @@ files = list.files(path = 'E:/gentrification/HMDA MS Katrina/1992-2003', pattern
 dat_list = lapply(paste('E:/gentrification/HMDA MS Katrina/1992-2003/',files,sep = ""), function (x) data.table(readRDS(x)))
 hmda_1992_2003 = rbindlist(dat_list, fill = TRUE)
 hmda_1992_2003 <- as.data.frame(hmda_1992_2003)
+hmda_1992_2003['ratespread'] <- NA
 
 
 files = list.files(path = 'E:/gentrification/HMDA MS Katrina/2004-2013', pattern = '^MS_045047059')
@@ -165,9 +166,11 @@ hmda['primaryfemale'] <- ifelse(hmda$applicantsex==2,1,0)
 hmda['approved'] <- ifelse(hmda$actiontaken<=2,1,0)
 hmda['jointapplication'] <- ifelse(hmda$coapplicantsex!=5,1,0)
 hmda$applicantincome <- as.numeric(hmda$applicantincome)
+hmda['owneroccupied']<-ifelse(hmda$occupancy==1,1,0)
 
 hmda['nonwhitenonasian'] <- ifelse(!hmda$applicantrace1 %in% c(5,2),1,0)
-
+hmda$ratespread <- as.numeric(hmda$ratespread)
+hmda['newpurchases'] <- ifelse(hmda$purposeofloan==1,1,0)
 # hmda$ratespread <- as.numeric(hmda$ratespread)
 ```
 # Treatment Census Tracts
@@ -218,26 +221,37 @@ map
 ```
 
 
+
+
 ```{r formulas}
 applicantincome = "log(applicantincome)~post*treat+nonwhite+primaryfemale+jointapplication|asofdate+countycode|0|asofdate+county_tract"
 nonwhite = "nonwhite~post*treat+log(applicantincome)+primaryfemale+jointapplication|asofdate+countycode|0|asofdate+county_tract"
 primaryfemale ="primaryfemale~post*treat+log(applicantincome)+nonwhite+jointapplication|asofdate+countycode|0|asofdate+county_tract"
 approved = "approved~post*treat+log(applicantincome)+nonwhite+jointapplication+primaryfemale|asofdate+countycode|0|asofdate+county_tract"
-
-dep.var.labels = c("log(applicantincome)","nonwhite","primaryfemale","approved")
+ratespread ="ratespread~post*treat+log(applicantincome)+nonwhite+jointapplication+primaryfemale|asofdate+countycode|0|asofdate+county_tract"
+dep.var.labels = c("log(applicantincome)","nonwhite","approved","ratespread")
 
 regression_results <- function(data) {
   regs <- list()
   regs[[1]] <- felm(as.formula(applicantincome),data = data)
   regs[[2]] <- felm(as.formula(nonwhite),data = data[data$applicantrace1!=6,])
-  regs[[3]] <- felm(as.formula(primaryfemale),data = data[data$jointapplication==0,])
-  regs[[4]] <- felm(as.formula(approved),data = sample)
+  regs[[3]] <- felm(as.formula(approved),data = data)
+  regs[[4]] <- felm(as.formula(ratespread),data = data[!is.na(data$ratespread),])
   stargazer(regs,type='text',omit.stat=c('ser'),dep.var.labels = dep.var.labels)
 }
 
 reg_sample = (2001:2010)
 ```
 
+# Descriptives - Treatment (New purchases, owner-occupied)
+```{r}
+stargazer(hmda[hmda$treat==1 & hmda$asofdate %in% reg_sample & hmda$occupancy==1 & hmda$purposeofloan==1, c("asofdate","amountofloan","applicantincome","nonwhite","approved")], type = 'text', summary.stat = c("mean", "sd", "p25", "median", "p75", "n"),notes = "",digits = 4)
+```
+
+# Descriptives - Control (New purchases, owner-occupied)
+```{r}
+stargazer(hmda[hmda$treat==0 & hmda$asofdate %in% reg_sample & hmda$occupancy==1 & hmda$purposeofloan==1, c("asofdate","amountofloan","applicantincome","nonwhite","approved")], type = 'text', summary.stat = c("mean", "sd", "p25", "median", "p75", "n"),notes = "",digits = 4)
+```
 
 # New Purchases, Owner occupied
 ```{r}
@@ -249,6 +263,61 @@ regression_results(sample)
 ```
 
 
+# Income Regression Parallel Trends (New Purchases, Owner occupied)
+```{r}
+years <- (2000:2010)
+sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy==1 & hmda$asofdate %in% years,] 
+sample['year'] <- as.factor(sample$asofdate)
+
+sample <- within(sample, year <- relevel(year, ref = 6))
+
+reg <- felm(as.formula("log(applicantincome)~year*treat|0|0|county_tract"),data = sample)
+
+
+coef <- c(reg$coefficients[13:17],0,reg$coefficients[18:22])
+se_lb <- coef - c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+se_ub <- coef + c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+
+df <- as.data.frame(cbind(years,coef))
+
+gr1<- ggplot(df, aes(x=years, y=coef)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0,position=position_dodge(0))+
+  scale_x_continuous(breaks=years)+ theme_bw()+ylab(expression(beta[t])) + xlab("")+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr1
+
+# stargazer(regs,type='text',omit.stat=c('ser'),dep.var.labels = dep.var.labels)
+```
+
+
+# Non-white Regression Parallel Trends (New Purchases, Owner occupied)
+```{r}
+years <- (2000:2010)
+sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy==1 & hmda$asofdate %in% years,] 
+sample['year'] <- as.factor(sample$asofdate)
+
+sample <- within(sample, year <- relevel(year, ref = 6))
+
+reg <- felm(as.formula("nonwhite~year*treat|0|0|county_tract"),data = sample[sample$applicantrace1!=6,])
+
+
+coef <- c(reg$coefficients[13:17],0,reg$coefficients[18:22])
+se_lb <- coef - c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+se_ub <- coef + c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+
+df <- as.data.frame(cbind(years,coef))
+
+gr2<- ggplot(df, aes(x=years, y=coef)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0,position=position_dodge(0))+
+  scale_x_continuous(breaks=years)+ theme_bw()+ylab(expression(beta[t])) + xlab("")+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr2
+
+# stargazer(regs,type='text',omit.stat=c('ser'),dep.var.labels = dep.var.labels)
+```
+
+
+
 # New Purchases, Non-owner occupied
 ```{r}
 
@@ -256,7 +325,6 @@ sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy!=1 & hmda$asofdate %in% re
 
 regression_results(sample)
 ```
-
 
 # Refinances, Owner-occupied
 ```{r}
