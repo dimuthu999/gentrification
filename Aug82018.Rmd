@@ -1,5 +1,5 @@
 ---
-title: "Gentrification after a Natural Disaster: The Case of Hurricane Katrina"
+title: "Do Risky Neighborhoods Attract More Vulnerable Residents? Evidence from Hurricane Katrina"
 output: 
   html_document:
     css: bodycss.css
@@ -60,6 +60,30 @@ body{
 knitr::opts_chunk$set(warning=FALSE, message=FALSE,echo=FALSE)
 ```
 
+
+# Questions
+Do affected areas attract <br/>
+&nbsp;&nbsp;&nbsp; lower income residents? <br/>
+&nbsp;&nbsp;&nbsp; minorities? <br/>
+&nbsp;&nbsp;&nbsp; less creditworthy residents?<br/>
+
+# Related Articles
+https://www.wsj.com/articles/climate-fears-reshape-miamis-housing-market-1524225600 <br/>
+http://iopscience.iop.org/article/10.1088/1748-9326/aabb32?mod=article_inline <br/>
+https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3073842 <br/>
+https://www.fastcompany.com/90204840/coastal-cities-are-already-in-the-grips-of-climate-gentrification
+https://www.youtube.com/watch?v=MWY_b-vpo4E
+https://www.youtube.com/watch?v=jR6bw90S3ps
+
+# Setup
+Treatment Group: Census Tracts directly affected by Hurricane Katrina Flooding<br/>
+Control Group: Census Tracts not directly affected by Hurricane Katrina Flooding
+
+# Data
+HMDA Loan Application Register Data<br/>
+FEMA GIS Layer for Hurricane Katrina<br/>
+ZTRAX<br/>
+Census Data
 
 ```{r init_mapdata}
 rm(list=ls())
@@ -334,3 +358,11 @@ sample <- hmda[hmda$purposeofloan==3 & hmda$occupancy==1 & hmda$asofdate %in% re
 regression_results(sample)
 ```
 
+# Future work
+Startups? <br/>
+Buyer location? <br/>
+House price growth? <br/>
+Voting. Left or right? <br/>
+How does climate change impact the societies, climate gentrification.<br/>
+<p>
+Climate change impacts arguably make some property more or less valuable by virtue of its capacity to accommodate a certain density of human settlement and its associated infrastructure. In other words, climate change will speed up the process of gentrification in coastal cities by constricting the supply of livable land, and rendering it very expensive due to scarcity. As that happens, lower-income people will struggle to remain in place. Keenan, Hill, and Gumber found ample evidence that this is already happening in Miami. The coastal city is seeing property values on high-elevation lands skyrocket, while once pricey waterfront property values are diminishing.</p>
