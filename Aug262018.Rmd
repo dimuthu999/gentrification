@@ -1,0 +1,381 @@
+---
+title: "Risk of Flooding and Climate Gentrification: Evidence from Hurricane Katrina"
+author: "Dimuthu Ratnadiwakara"
+output: 
+  html_document:
+    css: bodycss.css
+    fig_width: 8
+    font-family: Helvetica,Arial,sans-serif;
+    number_section: yes
+    toc: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+<style type="text/css">
+body{ 
+      font-size: 15px;
+      font-family: Helvetica,Arial,sans-serif;
+      line-height: 200%;
+  }
+  
+.author {
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+
+.date { 
+ font-size: 15px;
+ color: Black;
+ font-style: normal;
+ text-align: center;
+}
+
+.title{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+ 
+}
+
+.toc-ignore{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+.fluid-row{
+  text-align: center;
+  font-size: 15px;
+ color: Black;
+}
+
+</style>
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE,echo=FALSE)
+```
+
+
+<!--
+
+# Questions
+Do affected areas attract <br/>
+&nbsp;&nbsp;&nbsp; lower income residents? <br/>
+&nbsp;&nbsp;&nbsp; minorities? <br/>
+&nbsp;&nbsp;&nbsp; less creditworthy residents?<br/>
+
+# Related Articles
+https://www.wsj.com/articles/climate-fears-reshape-miamis-housing-market-1524225600 <br/>
+http://iopscience.iop.org/article/10.1088/1748-9326/aabb32?mod=article_inline <br/>
+https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3073842 <br/>
+https://www.fastcompany.com/90204840/coastal-cities-are-already-in-the-grips-of-climate-gentrification
+https://www.youtube.com/watch?v=MWY_b-vpo4E
+https://www.youtube.com/watch?v=jR6bw90S3ps
+
+--> 
+
+# Extended Abstracts
+>This paper investigates whether low-income households (and minorities) are forced into areas more vulnerable to flooding due to sea level rise, the process known as inverse climate gentrification ([Keenan, Hill and Gumber, 2018](http://iopscience.iop.org/article/10.1088/1748-9326/aabb32?mod=article_inline)). Establishing the causal relationship between risk of flooding and socioeconoimic changes would highlight one of the many threats climate change poses beyond physical environmental impact. Occurance of inverse climate gentrification would suggest that climate change may manifest to disrupt economically vulnerable communities and highlight the importance of long-term policy responses to mitigate climate gentrification. 
+
+>Studies such as [Keenan, Hill and Gumber (2018)](http://iopscience.iop.org/article/10.1088/1748-9326/aabb32?mod=article_inline) and [Bernstein, Gustafson and Lewis (2018)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3073842) show that coastal properties less vulnerable to sea level rise sell at a premium, making those unaffordable to low-income households. As a result, these more vulnerable populations would be forced into areas more vulnerable to sea level rise. To the best of my knowledge, this is the first paper that looks at this pathway by which climate change can impact societies.
+
+>The setting for this study is the affected counties in Mississippi before and after being hit by Hurricane Katrina in 2005. I use the mortgage applications in census tracts that were impacted by Hurricane Katrina as the treatment sample and controls sample consists of mortgage applications in unaffected census tracts. 
+
+
+# Setup
+Treatment Group: Census Tracts directly affected by Hurricane Katrina Flooding<br/>
+Control Group: Census Tracts not directly affected by Hurricane Katrina Flooding
+
+# Data
+HMDA Loan Application Register Data<br/>
+FEMA GIS Layer for Hurricane Katrina<br/>
+ZTRAX<br/>
+Census Data
+
+```{r init_mapdata}
+rm(list=ls())
+library(rgdal)
+library(ggplot2)
+library(rgeos)
+library(proj4)
+library(ggmap)
+library(sp)
+library(plyr)
+library(data.table)
+library(lfe)
+library(stargazer)
+
+
+pointsinside <- function(point,shapefile) {
+  output <- rep(NA,nrow(point))
+  pb <- txtProgressBar(min = 1, max = nrow(point), style = 3)
+  for(i in 1:nrow(point)) {
+      setTxtProgressBar(pb, i)
+      temp   <- SpatialPoints(point[i,],proj4string=CRS(proj4string(shapefile)))
+      output[i] <- gContains(shapefile,temp)
+  }
+  return (output)
+}
+
+ms_flood_raw <- readOGR("E:/gentrification/Katrina Flood Maps","Katrina_MS_SurgeInundationLimit")#  katrina_ms_abfe_contours
+ms_flood_raw <- gUnaryUnion(ms_flood_raw)
+proj4string <- "+proj=tmerc +lat_0=29.5 +lon_0=-88.83333333333333 +k=0.99995 +x_0=300000 +y_0=0 +datum=NAD83 +units=us-ft +no_defs +ellps=GRS80 +towgs84=0,0,0"
+ms_flood <- fortify(ms_flood_raw)
+xy <- data.frame(x=ms_flood$long, y=ms_flood$lat)
+pj <- project(xy, proj4string, inverse=TRUE)
+ms_flood$long <- pj$x
+ms_flood$lat <- pj$y
+
+# cencustracts <- readOGR("E:/gentrification/CensusTracts Maps","cb_2017_28_tract_500k") 
+# cencustracts <- cencustracts[cencustracts$COUNTYFP %in% c("047","045","059"),]
+# cencustracts.df <- as(cencustracts,"data.frame")
+# cencustracts <- fortify(cencustracts,region="GEOID")
+# cencustracts <- merge(cencustracts,cencustracts.df,by.x='id',by.y='GEOID')
+#   dat <- cencustracts
+#   pj <- project(data.frame(x=dat$long,y=dat$lat), proj4string, inverse=FALSE)
+#   dat$long <- pj$x
+#   dat$lat <- pj$y
+#   dat <- dat[,c("long","lat")]
+# cencustracts['inside_flood'] <- as.numeric(pointsinside(dat,ms_flood_raw))
+# save(cencustracts,file="E:/HarveyData/CensusTracts/cencustracts_ms.rda")
+
+load(file="E:/gentrification/CensusTracts Maps/cencustracts_ms.rda")
+
+
+insidecount <- ddply(cencustracts,.(id),summarise,inside=sum(inside_flood),count=length(inside_flood))
+insidecount['inside_pct'] <- insidecount$inside/insidecount$count
+insidecount <- insidecount[,c("id","inside_pct")]
+cencustracts <- merge(cencustracts,insidecount,by="id")
+# cencustracts <- cencustracts[cencustracts$TRACTCE != "",]
+cencustracts$TRACTCE <- ifelse(cencustracts$TRACTCE %in% c("003101","003208","001501","030602","003301","003303","003304","000900","003402","003102"),as.numeric(substr(cencustracts$id,6,25)),as.numeric(substr(floor(as.numeric(cencustracts$id)/100)*100,6,25)))
+cencustracts$COUNTYFP <- as.numeric(as.character(cencustracts$COUNTYFP))
+
+cencustracts['county_tract'] <- paste(cencustracts$COUNTYFP,cencustracts$TRACTCE)
+
+cencustracts_treat <- unique(cencustracts[cencustracts$inside_pct>=0.8,]$county_tract)
+cencustracts_treat <- c(cencustracts_treat,"47 600", "47 1300","47 100","47 2800","59 40600","59 41000","47 3600","47 3800","59 41500","59 41600","59 41700","59 41800","59 41900")
+cencustracts_treat <- cencustracts_treat[!cencustracts_treat %in% c("47 3200","45 30500","47 3301","47 3303","47 3304","47 900")]
+
+cencustracts_ctrl <- unique(cencustracts[cencustracts$inside_pct<=0.2,]$county_tract) # [9800]    
+cencustracts_ctrl <- c(cencustracts_ctrl,"47 1700","47 2400","47 2700","59 40800","59 40700","59 40400","47 3400","59 40100","47 1200","47 980000","47 3200","47 3101","47 1501" )
+cencustracts_ctrl <- cencustracts_ctrl[!cencustracts_ctrl %in% c("45 30602","47 3402")]
+
+cencustracts['treat'] <- ifelse(cencustracts$county_tract %in% cencustracts_treat,1,ifelse(cencustracts$county_tract %in% cencustracts_ctrl,-1,0))
+```
+
+
+```{r init_hmda_data}
+files = list.files(path = 'E:/gentrification/HMDA MS Katrina/1992-2003', pattern = '^MS_045047059')
+dat_list = lapply(paste('E:/gentrification/HMDA MS Katrina/1992-2003/',files,sep = ""), function (x) data.table(readRDS(x)))
+hmda_1992_2003 = rbindlist(dat_list, fill = TRUE)
+hmda_1992_2003 <- as.data.frame(hmda_1992_2003)
+hmda_1992_2003['ratespread'] <- NA
+
+
+files = list.files(path = 'E:/gentrification/HMDA MS Katrina/2004-2013', pattern = '^MS_045047059')
+dat_list = lapply(paste('E:/gentrification/HMDA MS Katrina/2004-2013/',files,sep = ""), function (x) data.table(readRDS(x)))
+hmda_2004_2013 = rbindlist(dat_list, fill = TRUE)
+hmda_2004_2013 <- as.data.frame(hmda_2004_2013)
+
+hmda_2004_2013 <- hmda_2004_2013[,names(hmda_2004_2013) %in% names(hmda_1992_2003)]
+
+hmda <- rbind(hmda_1992_2003,hmda_2004_2013)
+
+# hmda <- hmda[hmda$censustract!="32.08",]
+hmda$censustract <- ifelse(hmda$censustract %in% c("15.01","32.08","31.01","33.01","33.03","306.02","33.04","9","34.02","31.02"),as.numeric(hmda$censustract)*100,floor((as.numeric(hmda$censustract)*100)/100)*100)
+hmda['county_tract'] <- paste(hmda$countycode,hmda$censustract)
+
+
+hmda <- hmda[hmda$county_tract %in% c(cencustracts_ctrl,cencustracts_treat),]
+# hmda <- hmda[!hmda$censustract %in% c("47 1500","47 3200"),] # in both treatment and control
+
+hmda['post'] <- ifelse(hmda$asofdate>=2006,1,0)
+hmda['treat'] <- ifelse(hmda$county_tract %in% cencustracts_treat, 1,0)
+
+hmda['nonwhite'] <- ifelse(hmda$applicantrace1 != 5,1,0)
+hmda['primaryfemale'] <- ifelse(hmda$applicantsex==2,1,0)
+hmda['approved'] <- ifelse(hmda$actiontaken<=2,1,0)
+hmda['jointapplication'] <- ifelse(hmda$coapplicantsex!=5,1,0)
+hmda$applicantincome <- as.numeric(hmda$applicantincome)
+hmda['owneroccupied']<-ifelse(hmda$occupancy==1,1,0)
+
+hmda['nonwhitenonasian'] <- ifelse(!hmda$applicantrace1 %in% c(5,2),1,0)
+hmda$ratespread <- as.numeric(hmda$ratespread)
+hmda['newpurchases'] <- ifelse(hmda$purposeofloan==1,1,0)
+# hmda$ratespread <- as.numeric(hmda$ratespread)
+```
+# Treatment Census Tracts
+```{r flood_map_tr}
+# googlemap = get_map(location = c(-89, 30.4), zoom = 9, source = "google", maptype="terrain")
+# 
+# cnames <- aggregate(cbind(long, lat) ~ TRACTCE, data=cencustracts, FUN=median)
+
+# map <- ggmap(googlemap)+
+map <- ggplot(data=ms_flood,aes(x=long,y=lat,group=group))+
+  geom_polygon(fill='skyblue')+
+  # scale_x_continuous( limits = c( -89.7 , -88.3 ) )+
+  # scale_y_continuous( limits = c( 30.1 , 30.7 ) )+
+  geom_path(aes(x=long,y=lat,group=group),data=cencustracts,color = 'gray40',size=0.3)+
+  # geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==1,],color = 'blue',size=1)#+
+  geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==1,],color = 'red3',size=1)#+
+  # geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==-1,],color = 'gray40',size=1)#+
+  #geom_text(data=cnames, aes( fontface=1.5 ,cnames$long, cnames$lat , label = cnames$TRACTCE,group=TRACTCE), color= "black"  )
+
+map
+
+# boundary<-  ggplot(data=cencustracts,aes(x=long,y=lat,group=group))+geom_path()+geom_text(data=cnames, aes( fontface=1 ,cnames$long, cnames$lat , label = cnames$TRACTCE,group=TRACTCE), color= "black",size=2 )  
+# boundary
+```
+
+
+# Control Census Tracts
+```{r flood_map_ctrl}
+# googlemap = get_map(location = c(-89, 30.4), zoom = 9, source = "google", maptype="terrain")
+# 
+# cnames <- aggregate(cbind(long, lat) ~ TRACTCE, data=cencustracts, FUN=median)
+
+# map <- ggmap(googlemap)+
+map <- ggplot(data=ms_flood,aes(x=long,y=lat,group=group))+
+  geom_polygon(fill='skyblue')+
+  # scale_x_continuous( limits = c( -89.7 , -88.3 ) )+
+  # scale_y_continuous( limits = c( 30.1 , 30.7 ) )+
+  geom_path(aes(x=long,y=lat,group=group),data=cencustracts,color = 'gray40',size=0.3)+
+  # geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==1,],color = 'blue',size=1)#+
+  # geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==1,],color = 'blue',size=1)#+
+  geom_path(aes(x=long,y=lat,group=group),data=cencustracts[cencustracts$treat==-1,],color = 'green4',size=1)#+
+  #geom_text(data=cnames, aes( fontface=1.5 ,cnames$long, cnames$lat , label = cnames$TRACTCE,group=TRACTCE), color= "black"  )
+
+map
+
+# boundary<-  ggplot(data=cencustracts,aes(x=long,y=lat,group=group))+geom_path()+geom_text(data=cnames, aes( fontface=1 ,cnames$long, cnames$lat , label = cnames$TRACTCE,group=TRACTCE), color= "black",size=2 )  
+# boundary
+```
+
+
+
+
+```{r formulas}
+applicantincome = "log(applicantincome)~post*treat+nonwhite+primaryfemale+jointapplication|asofdate+countycode|0|asofdate+county_tract"
+nonwhite = "nonwhite~post*treat+log(applicantincome)+primaryfemale+jointapplication|asofdate+countycode|0|asofdate+county_tract"
+primaryfemale ="primaryfemale~post*treat+log(applicantincome)+nonwhite+jointapplication|asofdate+countycode|0|asofdate+county_tract"
+approved = "approved~post*treat+log(applicantincome)+nonwhite+jointapplication+primaryfemale|asofdate+countycode|0|asofdate+county_tract"
+ratespread ="ratespread~post*treat+log(applicantincome)+nonwhite+jointapplication+primaryfemale|asofdate+countycode|0|asofdate+county_tract"
+dep.var.labels = c("log(applicantincome)","nonwhite","approved","ratespread")
+
+regression_results <- function(data) {
+  regs <- list()
+  regs[[1]] <- felm(as.formula(applicantincome),data = data)
+  regs[[2]] <- felm(as.formula(nonwhite),data = data[data$applicantrace1!=6,])
+  regs[[3]] <- felm(as.formula(approved),data = data)
+  regs[[4]] <- felm(as.formula(ratespread),data = data[!is.na(data$ratespread),])
+  stargazer(regs,type='text',omit.stat=c('ser'),dep.var.labels = dep.var.labels)
+}
+
+reg_sample = (2001:2010)
+```
+
+# Descriptives - Treatment (New purchases, owner-occupied)
+```{r}
+stargazer(hmda[hmda$treat==1 & hmda$asofdate %in% reg_sample & hmda$occupancy==1 & hmda$purposeofloan==1, c("asofdate","amountofloan","applicantincome","nonwhite","approved")], type = 'text', summary.stat = c("mean", "sd", "p25", "median", "p75", "n"),notes = "",digits = 4)
+```
+
+# Descriptives - Control (New purchases, owner-occupied)
+```{r}
+stargazer(hmda[hmda$treat==0 & hmda$asofdate %in% reg_sample & hmda$occupancy==1 & hmda$purposeofloan==1, c("asofdate","amountofloan","applicantincome","nonwhite","approved")], type = 'text', summary.stat = c("mean", "sd", "p25", "median", "p75", "n"),notes = "",digits = 4)
+```
+
+# New Purchases, Owner occupied
+```{r}
+
+sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy==1 & hmda$asofdate %in% reg_sample,] 
+
+regression_results(sample)
+
+```
+
+
+# Income Regression Parallel Trends (New Purchases, Owner occupied)
+```{r}
+years <- (2000:2010)
+sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy==1 & hmda$asofdate %in% years,] 
+sample['year'] <- as.factor(sample$asofdate)
+
+sample <- within(sample, year <- relevel(year, ref = 6))
+
+reg <- felm(as.formula("log(applicantincome)~year*treat|0|0|county_tract"),data = sample)
+
+
+coef <- c(reg$coefficients[13:17],0,reg$coefficients[18:22])
+se_lb <- coef - c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+se_ub <- coef + c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+
+df <- as.data.frame(cbind(years,coef))
+
+gr1<- ggplot(df, aes(x=years, y=coef)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0,position=position_dodge(0))+
+  scale_x_continuous(breaks=years)+ theme_bw()+ylab(expression(beta[t])) + xlab("")+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr1
+
+# stargazer(regs,type='text',omit.stat=c('ser'),dep.var.labels = dep.var.labels)
+```
+
+
+# Non-white Regression Parallel Trends (New Purchases, Owner occupied)
+```{r}
+years <- (2000:2010)
+sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy==1 & hmda$asofdate %in% years,] 
+sample['year'] <- as.factor(sample$asofdate)
+
+sample <- within(sample, year <- relevel(year, ref = 6))
+
+reg <- felm(as.formula("nonwhite~year*treat|0|0|county_tract"),data = sample[sample$applicantrace1!=6,])
+
+
+coef <- c(reg$coefficients[13:17],0,reg$coefficients[18:22])
+se_lb <- coef - c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+se_ub <- coef + c(as.vector(reg$cse[13:17]),0,as.vector(reg$cse[18:22]))*1.64485
+
+df <- as.data.frame(cbind(years,coef))
+
+gr2<- ggplot(df, aes(x=years, y=coef)) + geom_hline(yintercept = 0)+
+  geom_point(color="red")+geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0,position=position_dodge(0))+
+  scale_x_continuous(breaks=years)+ theme_bw()+ylab(expression(beta[t])) + xlab("")+
+  theme(legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+gr2
+
+# stargazer(regs,type='text',omit.stat=c('ser'),dep.var.labels = dep.var.labels)
+```
+
+
+
+# New Purchases, Non-owner occupied
+```{r}
+
+sample <- hmda[hmda$purposeofloan==1 & hmda$occupancy!=1 & hmda$asofdate %in% reg_sample ,] 
+
+regression_results(sample)
+```
+
+# Refinances, Owner-occupied
+```{r}
+
+sample <- hmda[hmda$purposeofloan==3 & hmda$occupancy==1 & hmda$asofdate %in% reg_sample ,] 
+
+regression_results(sample)
+```
+
+# Future work
+Startups? <br/>
+Buyer location? <br/>
+House price growth? <br/>
+Voting. Left or right? <br/>
+How does climate change impact the societies, climate gentrification.<br/>
+<p>
+Climate change impacts arguably make some property more or less valuable by virtue of its capacity to accommodate a certain density of human settlement and its associated infrastructure. In other words, climate change will speed up the process of gentrification in coastal cities by constricting the supply of livable land, and rendering it very expensive due to scarcity. As that happens, lower-income people will struggle to remain in place. Keenan, Hill, and Gumber found ample evidence that this is already happening in Miami. The coastal city is seeing property values on high-elevation lands skyrocket, while once pricey waterfront property values are diminishing.</p>
