@@ -7,7 +7,7 @@ output:
     fig_width: 8
     font-family: Helvetica,Arial,sans-serif;
     number_section: yes
-    toc: yes
+    toc: no
   pdf_document:
     toc: yes
   word_document:
@@ -80,12 +80,14 @@ https://www.youtube.com/watch?v=jR6bw90S3ps
 
 --> 
 
-# Extended Abstracts
+# Introduction
 >This paper investigates whether low-income households (and minorities) are forced into areas more vulnerable to flooding due to sea level rise, the process known as inverse climate gentrification ([Keenan, Hill and Gumber, 2018](http://iopscience.iop.org/article/10.1088/1748-9326/aabb32?mod=article_inline)). Establishing the causal relationship between risk of flooding and socioeconoimic changes would highlight one of the many threats climate change poses beyond physical environmental impact. Occurance of inverse climate gentrification would suggest that climate change may manifest to disrupt economically vulnerable communities and highlight the importance of long-term policy responses to mitigate climate gentrification. 
 
 >Studies such as [Keenan, Hill and Gumber (2018)](http://iopscience.iop.org/article/10.1088/1748-9326/aabb32?mod=article_inline) and [Bernstein, Gustafson and Lewis (2018)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3073842) show that coastal properties less vulnerable to sea level rise sell at a premium, making those unaffordable to low-income households. As a result, these more vulnerable populations would be forced into areas more vulnerable to sea level rise. To the best of my knowledge, this is the first paper that looks at this pathway by which climate change can impact societies.
 
 >The setting for this study is the affected counties in Mississippi before and after being hit by Hurricane Katrina in 2005. I use the mortgage applications in census tracts that were impacted by Hurricane Katrina as the treatment sample and controls sample consists of mortgage applications in unaffected census tracts. 
+
+>Preliminary results suggest that family income reported in mortgage applications for <i>owner-occupied new home purchases</i> in affected census tracts was 5.8% lower compared to income of mortgage applicants in unaffected census tracts. I also find that fraction of mortgage applications for <i>owner-occupied new home purchases</i> by non-whites increased by about 5% in affected census tracts after Hurricane Katrina. Results also suggest that for <i>non-owner-occupied home purchases</i>, family income was 8.9% higher and fraction of non-whilte applications was about 10% lower in affected areas compared to unaffected areas, after Hurricane Katrina.
 
 
 # Setup
@@ -370,7 +372,7 @@ sample <- hmda[hmda$purposeofloan==3 & hmda$occupancy==1 & hmda$asofdate %in% re
 
 regression_results(sample)
 ```
-
+<!--
 # Future work
 Startups? <br/>
 Buyer location? <br/>
@@ -379,3 +381,5 @@ Voting. Left or right? <br/>
 How does climate change impact the societies, climate gentrification.<br/>
 <p>
 Climate change impacts arguably make some property more or less valuable by virtue of its capacity to accommodate a certain density of human settlement and its associated infrastructure. In other words, climate change will speed up the process of gentrification in coastal cities by constricting the supply of livable land, and rendering it very expensive due to scarcity. As that happens, lower-income people will struggle to remain in place. Keenan, Hill, and Gumber found ample evidence that this is already happening in Miami. The coastal city is seeing property values on high-elevation lands skyrocket, while once pricey waterfront property values are diminishing.</p>
+-->
+
