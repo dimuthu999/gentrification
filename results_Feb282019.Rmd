@@ -1,0 +1,618 @@
+---
+title: "ACS and SLR"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(data.table)
+library(rgdal)
+library(rgeos)
+library(ggplot2)
+library(tidycensus)
+library(lfe)
+library(stargazer)
+library(gridExtra)
+library(foreign)
+```
+
+
+```{r}
+slr_tracts <- read.dbf(file = "C:/Users/dnratnadiwakara/Documents/gentrification_combined/shapefiles/slr_tracts_orgslr.dbf",as.is = TRUE)
+slr_tracts$FIPS <- substr(slr_tracts$FIPS,1,9)
+
+slr_counties <- unique(substr(slr_tracts$FIPS,1,5))
+
+
+slr_tracts_opp_100miles <- read.dbf(file = "C:/Users/dnratnadiwakara/Documents/gentrification_combined/shapefiles/coastal_tracts_faraway_tracts.dbf",as.is = TRUE)
+slr_tracts_opp_100miles$FIPS <- substr(slr_tracts_opp_100miles$FIPS,1,9)
+
+
+coastal_states <- c("48","22","28","01","12","13","45","37","51","24","10","34","36","09","25","44","33","23")
+```
+
+```{r}
+yale_opinion <- read.csv(file="C:/Users/dnratnadiwakara/Documents/hmda_slr/YCOM_2016_Data.01.csv",stringsAsFactors = FALSE)
+yale_opinion <- yale_opinion[yale_opinion$GeoType=="County",c("GEOID","happening")]
+yale_opinion$GEOID <- as.character(yale_opinion$GEOID)
+yale_opinion$GEOID <- ifelse(nchar(yale_opinion$GEOID)<5,paste("0",yale_opinion$GEOID,sep=""),yale_opinion$GEOID)
+names(yale_opinion) <- c("county","climatechangereal")
+```
+
+```{r}
+
+us_state <- readOGR("C:/Users/dnratnadiwakara/Documents/temperature_gentrification/Data/cb_2014_us_state_20m","cb_2014_us_state_20m")
+us_state <- fortify(us_state,region="STATEFP")
+
+ggoptions_map=list(
+  scale_color_manual(values=c("bisque3","midnightblue")),
+  scale_fill_manual(values=c("bisque3","midnightblue")),
+  theme_minimal(),
+  theme(legend.position = "none",panel.grid = element_blank(),axis.text = element_blank()),
+  xlab(""),
+  ylab(""),
+  geom_polygon(data = us_state,aes(x = long, y = lat, group = group),colour="black",fill=NA)
+)
+
+
+
+ggoptions_diff=list(
+  geom_point(),
+  geom_hline(yintercept = 0),
+  theme_minimal(),
+  ylab(expression(beta[y])),
+  xlab(""),
+  theme(legend.position="bottom",legend.title=element_blank(),panel.border = element_blank(), axis.line.x = element_line(color = 'gray80'))
+)
+```
+
+
+```{r}
+# these files were created by acs_slr.R
+files = list.files(path = 'C:/Users/dnratnadiwakara/Documents/slr_acs/acs_data/', pattern = '.csv',full.names = TRUE)
+census = lapply(files, function (x) fread(x,sep="|",stringsAsFactors = FALSE,header = FALSE,colClasses = list(character=1:11)))
+census = rbindlist(census, fill = TRUE)
+
+col_names <- c("censustract","name","medianhhincome","medianage","totalpopulation","blackpopulation","whitepopulation","renters","laborforce","collegedegree","year")
+names(census) <- col_names
+
+census$medianhhincome <- as.numeric(census$medianhhincome)
+census$medianage <- as.numeric(census$medianage)
+census$collegedegree <- as.numeric(census$collegedegree)
+census$totalpopulation <- as.numeric(census$totalpopulation)
+census$blackpopulation <- as.numeric(census$blackpopulation)
+census$whitepopulation <- as.numeric(census$whitepopulation)
+census$renters <- as.numeric(census$renters)
+census$laborforce <- as.numeric(census$laborforce)
+
+
+census[,censustract:=substr(census$censustract,1,9)]
+
+census <- census[,.(medianhhincome=mean(medianhhincome,na.rm=TRUE),
+                    medianage=mean(medianage,na.rm=TRUE),
+                    totalpopulation=sum(totalpopulation,na.rm=TRUE),
+                    blackpopulation=sum(blackpopulation,na.rm=TRUE),
+                    whitepopulation=sum(whitepopulation,na.rm=TRUE),
+                    renters=sum(renters,na.rm=TRUE),
+                    laborforce=sum(laborforce,na.rm=TRUE),
+                    collegedegree=sum(collegedegree,na.rm=TRUE)),
+                 by=list(censustract,year)]
+
+
+census[,white_frac:=census$whitepopulation/census$totalpopulation]
+census[,black_frac:=census$blackpopulation/census$totalpopulation]
+census[,other_frac:=(census$totalpopulation-census$blackpopulation-census$whitepopulation)/census$totalpopulation]
+census[,college_frac:=census$collegedegree/census$totalpopulation]
+census[,renter_frac:=census$renters/census$totalpopulation]
+census[,state:=substr(census$censustract,1,2)]
+census[,county:=substr(census$censustract,1,5)]
+
+census[,slr_tract:=ifelse(census$censustract %in%  unique(slr_tracts$FIPS),1,0)]
+census[,slr_county:=ifelse(census$county %in%  slr_counties,1,0)]
+
+
+```
+
+
+
+```{r}
+census_summary <- census[census$year==2014, 
+                         .(white_frac = mean(white_frac,na.rm=TRUE),
+                           medianhhincome = mean(medianhhincome,na.rm=TRUE),
+                           totalpopulation = sum(totalpopulation,na.rm=TRUE),
+                           medianage=mean(medianage,na.rm=TRUE),
+                           college_frac=mean(college_frac,na.rm=TRUE),
+                           renter_frac=mean(renter_frac,na.rm=TRUE)), 
+                         by = list(slr_tract)]
+
+stargazer(t(census_summary),summary = FALSE,type="text")
+```
+
+```{r}
+formulas <- list()
+formulas[[1]] <- white_frac~slr_tract*factor(year)+log(totalpopulation)+log(medianhhincome)+college_frac|censustract+year|0|censustract
+formulas[[2]] <- log(medianhhincome)~slr_tract*factor(year)+log(totalpopulation)+college_frac|censustract+year|0|censustract
+formulas[[3]] <- renter_frac~slr_tract*factor(year)+log(totalpopulation)+log(medianhhincome)+college_frac|censustract+year|0|censustract
+formulas[[4]] <- college_frac~slr_tract*factor(year)+log(totalpopulation)+log(medianhhincome)|censustract+year|0|censustract
+
+regs <- list()
+for(i in 1:length(formulas)) {
+  regs[[i]] <- felm(formulas[[i]],data=census[census$slr_tract==1 | !census$county %in% slr_counties])  # [census$slr_tract==1 | census$censustract %in% unique(slr_tracts_opp_100miles$FIPS)]
+}
+
+
+stargazer(regs,type="text",no.space = TRUE,dep.var.labels.include = FALSE,omit.stat = c("ser"))
+
+```
+
+```{r}
+
+years <- c(2009:2017)
+gr <- list()
+dep.vars <- c("Fraction of White Population","log(Median Household Income)","Fraction of Renters","Fraction with College Degrees")
+
+for(i in 1:length(regs)) {
+  
+  coefs <- as.data.frame(regs[[i]]$coefficients)
+  coef_range <- (which(row.names(coefs)=="slr_tract:factor(year)2010")+1):(which(row.names(coefs)=="slr_tract:factor(year)2010")+7)
+  coef_range
+  coefs <- c(0,NA,regs[[i]]$coefficients[coef_range])
+  se <- c(0,NA,regs[[i]]$cse[coef_range])
+
+  se_lb <- coefs - se*1.96
+  se_ub <- coefs + se*1.96
+
+
+  df <- as.data.frame(cbind(years,coefs,se_lb,se_ub),stringsAsFactors = FALSE)
+  df$coefs <- as.numeric(df$coefs)
+  df$years <- as.integer(df$years)
+  df$se_lb <- as.numeric(df$se_lb)
+  df$se_ub <- as.numeric(df$se_ub)
+
+  gr[[i]] <-  ggplot(df, aes(x=years, y=coefs))+
+              geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0.1)+
+              ggtitle(dep.vars[i])+
+              scale_x_continuous(breaks=years)+
+              ggoptions_diff
+}
+
+
+grid.arrange(gr[[1]],gr[[2]],gr[[3]],gr[[4]],nrow=2)
+```
+
+
+```{r}
+rm(hmda)
+gc()
+files = list.files(path = paste('C:/Users/dnratnadiwakara/Documents/interest rate and default/Data/Raw/HMDA/rds/OO_NP',sep=""), pattern = '.rds',full.names = TRUE)
+hmda = lapply(files, function (x) readRDS(x))
+hmda = rbindlist(hmda, fill = TRUE)
+
+hmda[,censustract:=trimws(hmda$censustract)]
+
+hmda[,censustract:= paste(hmda$state,hmda$countycode,hmda$censustract,sep="")]
+hmda[,censustract:=substr(hmda$censustract,1,9)]
+
+hmda[,c("respondentid","agencycode","purposeofloan","occupancy","coapplicantsex","typeofpurchaser","denialreason1","propertytype","preapprovals","applicantethnicity","coapplicantenthnicity","applicantrace2","coapplicantrace1","coapplicantrace2","hoepastatus","lienstatus","seqno","hispanic"):=list(NULL)]
+
+hmda[,countycode:=paste(hmda$state,hmda$countycode,sep="")]
+
+# hmda <- hmda[hmda$state %in% coastal_states]
+hmda <- hmda[hmda$countycode %in% slr_counties]
+
+```
+
+```{r}
+files = list.files(path = 'C:/Users/dnratnadiwakara/Documents/interest rate and default/Data/Raw/HMDA/rds/pre2004/OO_NP', pattern = '.rds',full.names = TRUE)
+hmdapre2004 = lapply(files, function (x) readRDS(x))
+hmdapre2004 = rbindlist(hmdapre2004, fill = TRUE)
+
+hmdapre2004[,censustract:=trimws(hmdapre2004$censustract)]
+
+hmdapre2004 <- hmdapre2004[hmdapre2004$countycode != "NA" & hmdapre2004$censustract != "NA"]
+
+hmdapre2004[,censustract:= paste(hmdapre2004$state,hmdapre2004$countycode,hmdapre2004$censustract,sep="")]
+
+hmdapre2004[,censustract:=substr(hmdapre2004$censustract,1,9)]
+# hmdapre2004[,slr_tract:=ifelse(hmdapre2004$censustract %in% unique(tractsslr_df$hmda_tract),1,0)]
+gc()
+hmdapre2004[,c("respondentid","agencycode","purposeofloan","occupancy","applicantrace2","coapplicantsex","typeofpurchaser","denialreason1","seqno"):=list(NULL)]
+
+hmdapre2004[,ratespread:=NA]
+hmdapre2004[,countycode:=paste(hmdapre2004$state,hmdapre2004$countycode,sep="")]
+
+# hmdapre2004 <- hmdapre2004[hmdapre2004$state %in% coastal_states]
+hmdapre2004 <- hmdapre2004[hmdapre2004$countycode %in% slr_counties]
+
+gc()
+```
+
+
+
+```{r}
+hmda_sample_post2004 <- hmda[hmda$actiontaken %in% c("1","3") & hmda$countycode %in% slr_counties ] # & !hmda$state %in% c("48","36","34")
+hmda_sample_pre2004  <- hmdapre2004[hmdapre2004$actiontaken %in% c("1","3") & hmdapre2004$countycode %in% slr_counties ] # & !hmdapre2004$state %in% c("48","36","34")
+
+# hmda_sample_post2004 <- hmda[(hmda$censustract %in% unique(slr_tracts$FIPS) | !hmda$countycode %in% slr_counties) & hmda$actiontaken %in% c("1","3") & !hmda$state %in% c("48","36","34")]
+# hmda_sample_pre2004  <- hmdapre2004[(hmdapre2004$censustract %in% unique(slr_tracts$FIPS) | !hmdapre2004$countycode %in% slr_counties) & hmdapre2004$actiontaken %in% c("1","3")  & !hmdapre2004$state %in% c("48","36","34")]
+
+hmda_sample <- rbind(hmda_sample_post2004,hmda_sample_pre2004)
+
+rm(list=c("hmda_sample_post2004","hmda_sample_pre2004"))
+gc()
+
+hmda_sample[,slr_tract:=ifelse(hmda_sample$censustract %in%  unique(slr_tracts$FIPS),1,0)]
+
+hmda_sample[,asofdate:=as.integer(hmda_sample$asofdate)]
+hmda_sample[,white:=ifelse(hmda_sample$applicantrace1 %in% c("5"),1,0)]
+hmda_sample[,applicantincome:=as.numeric(hmda_sample$applicantincome)]
+hmda_sample[,amountofloan:=as.numeric(hmda_sample$amountofloan)]
+hmda_sample[,ratespread:=as.numeric(hmda_sample$ratespread)]
+
+
+
+hmda_sample[,denied:=ifelse(hmda_sample$actiontaken %in% c("3"),1,0)]
+
+  denial_rates <- hmda_sample[hmda_sample$actiontaken %in% c("1","3"),.(denial_rate=mean(denied,na.rm=TRUE)),by=list(asofdate,censustract)]
+  denial_rates[,asofdate:=as.integer(denial_rates$asofdate)]
+  
+hmda_sample <- merge(hmda_sample,denial_rates,by=c("asofdate","censustract"))
+  rm(denial_rates)
+  
+  win_95 <- hmda_sample[,.(pct025_income=quantile(applicantincome,0.1,na.rm = TRUE),
+                           pct975_income=quantile(applicantincome,0.9,na.rm = TRUE),
+                           pct025_loanamount=quantile(amountofloan,0.1,na.rm = TRUE),
+                           pct975_loanamount=quantile(amountofloan,0.9,na.rm = TRUE)),
+                        by=list(asofdate,countycode)]
+  
+hmda_sample <- merge(hmda_sample,win_95,by=c("asofdate","countycode"))
+  
+hmda_sample <- hmda_sample[
+                  hmda_sample$actiontaken %in% c("1") &
+                  hmda_sample$applicantincome >= hmda_sample$pct025_income &
+                  hmda_sample$applicantincome <= hmda_sample$pct975_income &
+                  hmda_sample$amountofloan >= hmda_sample$pct025_loanamount &
+                  hmda_sample$amountofloan <= hmda_sample$pct975_loanamount
+                ]
+
+  rm(win_95)
+
+hmda_sample <- merge(hmda_sample,yale_opinion,by.x="countycode",by.y="county",all.x=TRUE)
+hmda_sample[,loan_to_income:=hmda_sample$amountofloan/hmda_sample$applicantincome]
+gc()
+```
+
+
+
+```{r}
+
+gr <- list()
+
+dep.vars <- c("log(income)","white=1")
+
+formulas <- list()
+formulas[[1]] <- log(applicantincome)~slr_tract*factor(asofdate)+white+log(amountofloan)+denial_rate+climatechangereal+loan_to_income|censustract|0|censustract
+formulas[[2]] <- white~slr_tract*factor(asofdate)+log(applicantincome)+log(amountofloan)+denial_rate+climatechangereal+loan_to_income|censustract|0|censustract
+
+
+for(i in 1:length(formulas)) {
+  print(i)
+  reg <- NULL
+  reg <- felm(formulas[[i]],   data = hmda_sample[hmda_sample$asofdate>1989 & hmda_sample$applicantincome>0 & hmda_sample$amountofloan>0 ])
+  
+  coefs <- as.data.frame(reg$coefficients)
+  
+  st <- as.integer(substr(row.names(coefs)[which(substr(row.names(coefs),1,26)=="slr_tract:factor(asofdate)")[1]],27,30))-1
+  years <- c(st:2016)
+  
+  coefs_range = which(substr(row.names(coefs),1,26)=="slr_tract:factor(asofdate)")[1]:which(row.names(coefs)=="slr_tract:factor(asofdate)2016")
+  
+  coefs <- as.vector(c(0,reg$coefficients[coefs_range])) #,0,regs[[1]]$coefficients[coefs_range]))
+  se <- as.vector(c(0,reg$cse[coefs_range]))  #,0,regs[[1]]$cse[coefs_range]))
+  
+  se_lb <- coefs - se*1.96
+  se_ub <- coefs + se*1.96
+  
+  df <- as.data.frame(cbind(years,coefs,se_lb,se_ub),stringsAsFactors = FALSE)
+  df$coefs <- as.numeric(df$coefs)
+  df$years <- as.integer(df$years)
+  df$se_lb <- as.numeric(df$se_lb)
+  df$se_ub <- as.numeric(df$se_ub)
+  
+  
+  gr[[i]] <-  ggplot(df, aes(x=years, y=coefs))+
+              geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0.1)+
+              scale_x_continuous(breaks=years)+
+              ggtitle(dep.vars[i])+
+              ggoptions_diff
+}
+
+
+grid.arrange(gr[[1]],gr[[2]],nrow=2)
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+gc()
+files = list.files(path = paste('C:/Users/dnratnadiwakara/Documents/interest rate and default/Data/Raw/HMDA/rds/OO_RF',sep=""), pattern = '.rds',full.names = TRUE)
+hmda_rf = lapply(files, function (x) readRDS(x))
+hmda_rf = rbindlist(hmda_rf, fill = TRUE)
+
+hmda_rf[,censustract:=trimws(hmda_rf$censustract)]
+
+hmda_rf[,censustract:= paste(hmda_rf$state,hmda_rf$countycode,hmda_rf$censustract,sep="")]
+hmda_rf[,censustract:=substr(hmda_rf$censustract,1,9)]
+
+hmda_rf[,c("respondentid","agencycode","purposeofloan","occupancy","coapplicantsex","typeofpurchaser","denialreason1","propertytype","preapprovals","applicantethnicity","coapplicantenthnicity","applicantrace2","coapplicantrace1","coapplicantrace2","hoepastatus","lienstatus","seqno","hispanic"):=list(NULL)]
+
+hmda_rf[,countycode:=paste(hmda_rf$state,hmda_rf$countycode,sep="")]
+
+hmda_rf <- hmda_rf[hmda_rf$countycode %in% slr_counties]
+
+gc()
+```
+
+
+
+
+```{r}
+gc()
+files = list.files(path = paste('C:/Users/dnratnadiwakara/Documents/interest rate and default/Data/Raw/HMDA/rds/pre2004/OO_RF',sep=""), pattern = '.rds',full.names = TRUE)
+hmda_rfpre2004 = lapply(files, function (x) readRDS(x))
+hmda_rfpre2004 = rbindlist(hmda_rfpre2004, fill = TRUE)
+
+hmda_rfpre2004[,censustract:=trimws(hmda_rfpre2004$censustract)]
+
+hmda_rfpre2004[,censustract:= paste(hmda_rfpre2004$state,hmda_rfpre2004$countycode,hmda_rfpre2004$censustract,sep="")]
+hmda_rfpre2004[,censustract:=substr(hmda_rfpre2004$censustract,1,9)]
+
+hmda_rfpre2004[,c("respondentid","agencycode","purposeofloan","occupancy","coapplicantsex","typeofpurchaser","denialreason1","propertytype","preapprovals","applicantethnicity","coapplicantenthnicity","applicantrace2","coapplicantrace1","coapplicantrace2","hoepastatus","lienstatus","seqno","hispanic"):=list(NULL)]
+
+hmda_rfpre2004[,countycode:=paste(hmda_rfpre2004$state,hmda_rfpre2004$countycode,sep="")]
+
+hmda_rfpre2004 <- hmda_rfpre2004[hmda_rfpre2004$countycode %in% slr_counties]
+
+hmda_rfpre2004[,ratespread:=NA]
+
+gc()
+```
+
+
+```{r}
+hmda_sample_post2004 <- hmda_rf[hmda_rf$actiontaken %in% c("1","3")]
+hmda_sample_pre2004  <- hmda_rfpre2004[hmda_rfpre2004$actiontaken %in% c("1","3")]
+
+hmda_sample <- rbind(hmda_sample_post2004,hmda_sample_pre2004)
+
+rm(list=c("hmda_sample_post2004","hmda_sample_pre2004"))
+gc()
+
+hmda_sample[,slr_tract:=ifelse(hmda_sample$censustract %in%  unique(slr_tracts$FIPS),1,0)]
+
+hmda_sample[,asofdate:=as.integer(hmda_sample$asofdate)]
+hmda_sample[,white:=ifelse(hmda_sample$applicantrace1 %in% c("5"),1,0)]
+hmda_sample[,applicantincome:=as.numeric(hmda_sample$applicantincome)]
+hmda_sample[,amountofloan:=as.numeric(hmda_sample$amountofloan)]
+hmda_sample[,ratespread:=as.numeric(hmda_sample$ratespread)]
+
+
+
+hmda_sample[,denied:=ifelse(hmda_sample$actiontaken %in% c("3"),1,0)]
+
+  denial_rates <- hmda_sample[hmda_sample$actiontaken %in% c("1","3"),.(denial_rate=mean(denied,na.rm=TRUE)),by=list(asofdate,censustract)]
+  denial_rates[,asofdate:=as.integer(denial_rates$asofdate)]
+  
+hmda_sample <- merge(hmda_sample,denial_rates,by=c("asofdate","censustract"))
+  rm(denial_rates)
+  
+  win_95 <- hmda_sample[,.(pct025_income=quantile(applicantincome,0.1,na.rm = TRUE),
+                           pct975_income=quantile(applicantincome,0.9,na.rm = TRUE),
+                           pct025_loanamount=quantile(amountofloan,0.1,na.rm = TRUE),
+                           pct975_loanamount=quantile(amountofloan,0.9,na.rm = TRUE)),
+                        by=list(asofdate,countycode)]
+  
+hmda_sample <- merge(hmda_sample,win_95,by=c("asofdate","countycode"))
+  
+hmda_sample <- hmda_sample[
+                  hmda_sample$actiontaken %in% c("1") &
+                  hmda_sample$applicantincome >= hmda_sample$pct025_income &
+                  hmda_sample$applicantincome <= hmda_sample$pct975_income &
+                  hmda_sample$amountofloan >= hmda_sample$pct025_loanamount &
+                  hmda_sample$amountofloan <= hmda_sample$pct975_loanamount
+                ]
+
+  rm(win_95)
+
+hmda_sample <- merge(hmda_sample,yale_opinion,by.x="countycode",by.y="county",all.x=TRUE)
+hmda_sample[,loan_to_income:=hmda_sample$amountofloan/hmda_sample$applicantincome]
+gc()
+```
+
+```{r}
+
+gr <- list()
+
+dep.vars <- c("log(income)","white=1")
+
+formulas <- list()
+formulas[[1]] <- log(applicantincome)~slr_tract*factor(asofdate)+white+log(amountofloan)+denial_rate+climatechangereal+loan_to_income|censustract|0|censustract
+formulas[[2]] <- white~slr_tract*factor(asofdate)+log(applicantincome)+log(amountofloan)+denial_rate+climatechangereal+loan_to_income|censustract|0|censustract
+
+
+for(i in 1:length(formulas)) {
+  print(i)
+  reg <- NULL
+  reg <- felm(formulas[[i]],   data = hmda_sample[hmda_sample$asofdate>1989 & hmda_sample$applicantincome>0 & hmda_sample$amountofloan>0 ])
+  
+  coefs <- as.data.frame(reg$coefficients)
+  
+  st <- as.integer(substr(row.names(coefs)[which(substr(row.names(coefs),1,26)=="slr_tract:factor(asofdate)")[1]],27,30))-1
+  years <- c(st:2016)
+  
+  coefs_range = which(substr(row.names(coefs),1,26)=="slr_tract:factor(asofdate)")[1]:which(row.names(coefs)=="slr_tract:factor(asofdate)2016")
+  
+  coefs <- as.vector(c(0,reg$coefficients[coefs_range])) #,0,regs[[1]]$coefficients[coefs_range]))
+  se <- as.vector(c(0,reg$cse[coefs_range]))  #,0,regs[[1]]$cse[coefs_range]))
+  
+  se_lb <- coefs - se*1.96
+  se_ub <- coefs + se*1.96
+  
+  df <- as.data.frame(cbind(years,coefs,se_lb,se_ub),stringsAsFactors = FALSE)
+  df$coefs <- as.numeric(df$coefs)
+  df$years <- as.integer(df$years)
+  df$se_lb <- as.numeric(df$se_lb)
+  df$se_ub <- as.numeric(df$se_ub)
+  
+  
+  gr[[i]] <-  ggplot(df, aes(x=years, y=coefs))+
+              geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0.1)+
+              scale_x_continuous(breaks=years)+
+              ggtitle(dep.vars[i])+
+              ggoptions_diff
+}
+
+
+grid.arrange(gr[[1]],gr[[2]],nrow=2)
+
+```
+
+
+
+```{r eval=FALSE}
+hmda_sample_post2004 <- hmda[hmda$actiontaken %in% c("1","3") & hmda$censustract %in% unique(slr_tracts$FIPS) ] # & !hmda$state %in% c("48","36","34")
+hmda_sample_pre2004  <- hmdapre2004[hmdapre2004$actiontaken %in% c("1","3") & hmdapre2004$censustract %in% unique(slr_tracts$FIPS) ] # & !hmdapre2004$state %in% c("48","36","34")
+
+
+hmda_sample <- rbind(hmda_sample_post2004,hmda_sample_pre2004)
+hmda_sample[,newpurchase:=1]
+
+hmda_sample_post2004 <- hmda_rf[hmda_rf$actiontaken %in% c("1","3") & hmda_rf$censustract %in% unique(slr_tracts$FIPS) ] 
+hmda_sample_pre2004  <- hmda_rfpre2004[hmda_rfpre2004$actiontaken %in% c("1","3") & hmda_rfpre2004$censustract %in% unique(slr_tracts$FIPS) ] 
+hmda_sample_rf <- rbind(hmda_sample_post2004,hmda_sample_pre2004)
+hmda_sample_rf[,newpurchase:=0]
+
+hmda_sample <- rbind(hmda_sample,hmda_sample_rf)
+
+rm(list=c("hmda_sample_post2004","hmda_sample_pre2004","hmda_sample_rf"))
+gc()
+
+# hmda_sample[,slr_tract:=ifelse(hmda_sample$censustract %in%  unique(slr_tracts$FIPS),1,0)]
+
+hmda_sample[,asofdate:=as.integer(hmda_sample$asofdate)]
+hmda_sample[,white:=ifelse(hmda_sample$applicantrace1 %in% c("5"),1,0)]
+hmda_sample[,applicantincome:=as.numeric(hmda_sample$applicantincome)]
+hmda_sample[,amountofloan:=as.numeric(hmda_sample$amountofloan)]
+hmda_sample[,ratespread:=as.numeric(hmda_sample$ratespread)]
+
+
+
+hmda_sample[,denied:=ifelse(hmda_sample$actiontaken %in% c("3"),1,0)]
+
+  denial_rates_np <- hmda_sample[hmda_sample$actiontaken %in% c("1","3") & hmda_sample$newpurchase==1, 
+                              .(denial_rate_np=mean(denied,na.rm=TRUE)),
+                              by=list(asofdate,censustract)]
+  
+  denial_rates_rf <- hmda_sample[hmda_sample$actiontaken %in% c("1","3") & hmda_sample$newpurchase==0, 
+                              .(denial_rate_rf=mean(denied,na.rm=TRUE)),
+                              by=list(asofdate,censustract)]
+  
+hmda_sample <- merge(hmda_sample,denial_rates_np,by=c("asofdate","censustract"))  
+hmda_sample <- merge(hmda_sample,denial_rates_rf,by=c("asofdate","censustract"))
+
+  rm(list=c("denial_rates_np","denial_rates_rf"))
+  
+  win_95_np <- hmda_sample[hmda_sample$newpurchase==1,
+                         .(pct025_income=quantile(applicantincome,0.1,na.rm = TRUE),
+                           pct975_income=quantile(applicantincome,0.9,na.rm = TRUE),
+                           pct025_loanamount=quantile(amountofloan,0.1,na.rm = TRUE),
+                           pct975_loanamount=quantile(amountofloan,0.9,na.rm = TRUE)),
+                        by=list(asofdate,countycode)]
+  
+  win_95_rf <- hmda_sample[hmda_sample$newpurchase==0,
+                         .(pct025_income_rf=quantile(applicantincome,0.1,na.rm = TRUE),
+                           pct975_income_rf=quantile(applicantincome,0.9,na.rm = TRUE),
+                           pct025_loanamount_rf=quantile(amountofloan,0.1,na.rm = TRUE),
+                           pct975_loanamount_rf=quantile(amountofloan,0.9,na.rm = TRUE)),
+                        by=list(asofdate,countycode)]
+
+    
+hmda_sample <- merge(hmda_sample,win_95_np,by=c("asofdate","countycode"))
+hmda_sample <- merge(hmda_sample,win_95_rf,by=c("asofdate","countycode"))
+
+hmda_sample <- hmda_sample[hmda_sample$actiontaken %in% c("1")]  
+
+hmda_sample <- hmda_sample[
+                  (hmda_sample$newpurchase==1 &
+                  hmda_sample$applicantincome >= hmda_sample$pct025_income &
+                  hmda_sample$applicantincome <= hmda_sample$pct975_income &
+                  hmda_sample$amountofloan >= hmda_sample$pct025_loanamount &
+                  hmda_sample$amountofloan <= hmda_sample$pct975_loanamount) |
+                  (hmda_sample$newpurchase==0 &
+                  hmda_sample$applicantincome >= hmda_sample$pct025_income_rf &
+                  hmda_sample$applicantincome <= hmda_sample$pct975_income_rf &
+                  hmda_sample$amountofloan >= hmda_sample$pct025_loanamount_rf &
+                  hmda_sample$amountofloan <= hmda_sample$pct975_loanamount_rf)
+                ]
+
+  rm(win_95)
+
+hmda_sample <- merge(hmda_sample,yale_opinion,by.x="countycode",by.y="county",all.x=TRUE)
+hmda_sample[,loan_to_income:=hmda_sample$amountofloan/hmda_sample$applicantincome]
+gc()
+```
+
+
+```{r eval=FALSE}
+gr <- list()
+
+dep.vars <- c("log(income)","white=1")
+
+formulas <- list()
+formulas[[1]] <- log(applicantincome)~newpurchase*factor(asofdate)+white+log(amountofloan)+denial_rate_np+denial_rate_rf+climatechangereal+loan_to_income|censustract|0|censustract
+formulas[[2]] <- white~newpurchase*factor(asofdate)+log(applicantincome)+log(amountofloan)+denial_rate_np+denial_rate_rf+climatechangereal+loan_to_income|censustract|0|censustract
+
+
+for(i in 1:length(formulas)) {
+  print(i)
+  reg <- NULL
+  reg <- felm(formulas[[i]],   data = hmda_sample[hmda_sample$asofdate>1989 & hmda_sample$applicantincome>0 & hmda_sample$amountofloan>0 ])
+  
+  coefs <- as.data.frame(reg$coefficients)
+  
+  st <- as.integer(substr(row.names(coefs)[which(substr(row.names(coefs),1,26)=="slr_tract:factor(asofdate)")[1]],27,30))-1
+  years <- c(st:2016)
+  
+  coefs_range = which(substr(row.names(coefs),1,26)=="slr_tract:factor(asofdate)")[1]:which(row.names(coefs)=="slr_tract:factor(asofdate)2016")
+  
+  coefs <- as.vector(c(0,reg$coefficients[coefs_range])) #,0,regs[[1]]$coefficients[coefs_range]))
+  se <- as.vector(c(0,reg$cse[coefs_range]))  #,0,regs[[1]]$cse[coefs_range]))
+  
+  se_lb <- coefs - se*1.96
+  se_ub <- coefs + se*1.96
+  
+  df <- as.data.frame(cbind(years,coefs,se_lb,se_ub),stringsAsFactors = FALSE)
+  df$coefs <- as.numeric(df$coefs)
+  df$years <- as.integer(df$years)
+  df$se_lb <- as.numeric(df$se_lb)
+  df$se_ub <- as.numeric(df$se_ub)
+  
+  
+  gr[[i]] <-  ggplot(df, aes(x=years, y=coefs))+
+              geom_errorbar(aes(ymin=se_lb, ymax=se_ub), width=0.1)+
+              scale_x_continuous(breaks=years)+
+              ggtitle(dep.vars[i])+
+              ggoptions_diff
+}
+
+
+grid.arrange(gr[[1]],gr[[2]],nrow=2)
+```
